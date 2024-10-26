@@ -1,4 +1,4 @@
-#include "stella/runtime.h"
+#include "../stella/runtime.h"
 #include <locale.h>
 
 stella_object *_stella_id_main;

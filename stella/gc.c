@@ -17,6 +17,12 @@ int max_allocated_objects = 0;
 int total_reads = 0;
 int total_writes = 0;
 
+/** Total count gc collect (over the entire duration of the program). */
+int total_gc_collect = 0;
+
+/** Scan variable of copying garbage collection algorithm */
+void* scan;
+
 #define MAX_GC_ROOTS 1024
 #define MAX_ALLOC_SIZE (8 * 100)
 #define MAX_G0_SIZE MAX_ALLOC_SIZE
@@ -36,8 +42,6 @@ void *to_space_next;
 void* try_alloc(size_t size_in_bytes);
 void alloc_stat_update(size_t size_in_bytes);
 bool is_in_heap(const void* ptr, const void* heap, size_t heap_size);
-void chase(stella_object *p);
-void* forward(stella_object* p);
 void gc_collect();
 int get_size(const stella_object *obj);
 
@@ -71,13 +75,39 @@ void print_gc_roots() {
 
 void print_gc_alloc_stats() {
   printf("Total memory allocation: %d bytes (%d objects)\n", total_allocated_bytes, total_allocated_objects);
+  printf("Total garbage collecting: %d\n", total_gc_collect);
   printf("Maximum residency:       %d bytes (%d objects)\n", max_allocated_bytes, max_allocated_objects);
   printf("Total memory use:        %d reads and %d writes\n", total_reads, total_writes);
   printf("Max GC roots stack size: %d roots\n", gc_roots_max_size);
+
+  print_gc_state(); // for debug
 }
 
 void print_gc_state() {
-  // TODO: not implemented
+  printf("Objects from G_0:\n");
+  for (void *start = from_space; start < from_space_next; start += get_size(start)) {
+    stella_object *st_obj = start;
+    const int tag = STELLA_OBJECT_HEADER_TAG(st_obj->object_header);
+    printf("\tAddress: %p; tag: %d; fields: ", st_obj, tag);
+
+    const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(st_obj->object_header);
+    for (int i = 0; i < field_count; i++) {
+      printf("%p", st_obj->object_fields[i]);
+      if (i < field_count - 1) {
+        printf(", ");
+      } else {
+        printf("; ");
+      }
+    }
+
+    printf("beauty value: ");
+    print_stella_object(st_obj);
+    printf("\n");
+  }
+
+  printf("G_0 boundaries from: %p to: %p\n", from_space, from_space + MAX_ALLOC_SIZE);
+  printf("G_0 free memory part from: %p to: %p\n", from_space_next, from_space + MAX_ALLOC_SIZE);
+  printf("Scan: %p, Next: %p, Limit: %p\n", scan, to_space_next, to_space + MAX_ALLOC_SIZE);
 }
 
 void gc_read_barrier(void *object, int field_index) {
@@ -108,7 +138,7 @@ void* try_alloc(const size_t size_in_bytes) {
     return result;
   }
 
-  return NULL; // выход? как обрабатывать отсутствие памяти
+  exit(1); // выход? как обрабатывать отсутствие памяти
 }
 
 void alloc_stat_update(const size_t size_in_bytes) {
@@ -158,13 +188,17 @@ void* forward(stella_object* p) {
   return p->object_fields[0];
 }
 
+void gc_collect_stat_update() {
+  total_gc_collect += 1;
+}
+
 void gc_collect() {
   if (to_space == NULL) {
     to_space = malloc(MAX_ALLOC_SIZE);
     to_space_next = to_space;
   }
 
-  void* scan = to_space_next;
+  scan = to_space_next;
 
   for (int i = 0; i < gc_roots_top; i++) {
     void **root_ptr = gc_roots[i];
@@ -187,9 +221,11 @@ void gc_collect() {
 
   from_space_next = to_space_next;
   to_space_next = to_space;
+
+  gc_collect_stat_update();
 }
 
 int get_size(const stella_object *obj) {
   const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
-  return field_count * sizeof(void*) + sizeof(int);  // по рантайму берется void* и возможно доп сжатие
+  return (1 + field_count) * sizeof(void*);
 }

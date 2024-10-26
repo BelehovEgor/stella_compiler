@@ -6,4 +6,4 @@ set(CMAKE_C_STANDARD 11)
 add_executable(kkuk main.c
         stella/gc.c
         stella/runtime.c
-        example.c)
+        tests/return_argument.c)
