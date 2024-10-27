@@ -168,7 +168,7 @@ void* get_space(struct generation* g, const size_t size) {
 }
 
 void print_state(struct generation* g) {
-  printf("Collection number %d\n", total_gc_collect);
+  printf("Collect number %d\n", total_gc_collect);
   printf("Objects from G_%d:\n", g->number);
   for (void *start = g->from_space; start < g->from_space_next; start += get_size(start)) {
     stella_object *st_obj = start;
