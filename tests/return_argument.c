@@ -17,7 +17,7 @@ stella_object *_fn__stella_id_main(stella_object *_cls, stella_object *_stella_i
 stella_object_1 _cls__stella_id_main = { .object_header = TAG_FN, .object_fields = { &_fn__stella_id_main } } ;
 stella_object *_stella_id_main = (stella_object *)&_cls__stella_id_main;
 
-int main(int argc, char **argv) {
+int main_2(int argc, char **argv) {
   int n;
   setlocale(LC_NUMERIC, "");
   scanf("%d", &n);

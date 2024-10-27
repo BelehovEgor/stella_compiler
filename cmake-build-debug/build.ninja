@@ -49,12 +49,6 @@ cmake_ninja_workdir = /Users/ebelekhov/dev/itmo/stella_compiler/cmake-build-debu
 
 build cmake_object_order_depends_target_kkuk: phony || CMakeFiles/kkuk.dir
 
-build CMakeFiles/kkuk.dir/main.c.o: C_COMPILER__kkuk_unscanned_Debug /Users/ebelekhov/dev/itmo/stella_compiler/main.c || cmake_object_order_depends_target_kkuk
-  DEP_FILE = CMakeFiles/kkuk.dir/main.c.o.d
-  FLAGS = -g -std=gnu11 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.4.sdk -fcolor-diagnostics
-  OBJECT_DIR = CMakeFiles/kkuk.dir
-  OBJECT_FILE_DIR = CMakeFiles/kkuk.dir
-
 build CMakeFiles/kkuk.dir/stella/gc.c.o: C_COMPILER__kkuk_unscanned_Debug /Users/ebelekhov/dev/itmo/stella_compiler/stella/gc.c || cmake_object_order_depends_target_kkuk
   DEP_FILE = CMakeFiles/kkuk.dir/stella/gc.c.o.d
   FLAGS = -g -std=gnu11 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.4.sdk -fcolor-diagnostics
@@ -81,7 +75,7 @@ build CMakeFiles/kkuk.dir/tests/return_argument.c.o: C_COMPILER__kkuk_unscanned_
 #############################################
 # Link the executable kkuk
 
-build kkuk: C_EXECUTABLE_LINKER__kkuk_Debug CMakeFiles/kkuk.dir/main.c.o CMakeFiles/kkuk.dir/stella/gc.c.o CMakeFiles/kkuk.dir/stella/runtime.c.o CMakeFiles/kkuk.dir/tests/return_argument.c.o
+build kkuk: C_EXECUTABLE_LINKER__kkuk_Debug CMakeFiles/kkuk.dir/stella/gc.c.o CMakeFiles/kkuk.dir/stella/runtime.c.o CMakeFiles/kkuk.dir/tests/return_argument.c.o
   FLAGS = -g -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX14.4.sdk
   OBJECT_DIR = CMakeFiles/kkuk.dir
   POST_BUILD = :
