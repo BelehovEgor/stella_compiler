@@ -21,7 +21,7 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (16 * 100)
+#define MAX_ALLOC_SIZE (16 * 80)
 #define DEBUG_LOGS
 
 int gc_roots_max_size = 0;
@@ -36,6 +36,7 @@ int get_size(const stella_object *obj);
 
 struct generation {
   int number;
+  int collect_count;
   int size;
   void* from_space_next;
   void* from_space;
@@ -77,10 +78,12 @@ void print_gc_roots() {
 }
 
 void print_separator() {
-  printf("----------------------------------------\n");
+  printf("=====================================================================================\n");
 }
 
 void print_gc_alloc_stats() {
+  print_separator();
+  printf("STATS");
   print_separator();
 
   printf("Total memory allocation: %d bytes (%d objects)\n", total_allocated_bytes, total_allocated_objects);
@@ -93,19 +96,16 @@ void print_gc_alloc_stats() {
 }
 
 void print_gc_state() {
-  // Состояние кучи
-  print_separator();
-  printf("GC state:\n");
-
   print_state(&g0);
 
-  // Корни
-  printf("Roots:\n");
+  printf("ROOTS:\n");
+  print_separator();
   for (int i = 0; i < gc_roots_top; i++) {
     printf(
-      "\tPointer to: %p is in g_0: %s\n",
-      *gc_roots[i],
-      is_here(&g0, *gc_roots[i]) ? "true" : "false");
+      "\tIDX: %d, ADDRESS: %p, VALUE: %p\n",
+      i,
+      gc_roots[i],
+      *gc_roots[i]);
   }
 
   print_separator();
@@ -168,33 +168,37 @@ void* get_space(struct generation* g, const size_t size) {
 }
 
 void print_state(struct generation* g) {
-  printf("Collect number %d\n", total_gc_collect);
-  printf("Objects from G_%d:\n", g->number);
+  print_separator();
+  printf("G_%d STATE\n", g->number);
+  print_separator();
+
+  printf("COLLECT COUNT %d\n", g->collect_count);
+  printf("OBJECTS:\n");
   for (void *start = g->from_space; start < g->from_space_next; start += get_size(start)) {
     stella_object *st_obj = start;
     const int tag = STELLA_OBJECT_HEADER_TAG(st_obj->object_header);
-    printf("\tAddress: %p; tag: %d; fields: ", st_obj, tag);
+    printf("\tADDRESS: %p | TAG: %d | FIELDS: ", st_obj, tag);
 
     const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(st_obj->object_header);
     for (int i = 0; i < field_count; i++) {
       printf("%p", st_obj->object_fields[i]);
       if (i < field_count - 1) {
         printf(", ");
-      } else {
-        printf("; ");
       }
     }
 
-    // заканчивается память - стараюсь напечатать не доконца созданный объект и получаю неправильное обращение к памяти
-    //printf("beauty value: ");
-    //print_stella_object(st_obj);
     printf("\n");
   }
 
   // Кол-во выделенной памяти
-  printf("G_0 boundaries from: %p to: %p\n", g->from_space, g->from_space + g->size);
-  printf("G_0 free memory part from: %p to: %p\n", g->from_space_next, g->from_space + g->size);
-  printf("Scan: %p, Next: %p, Limit: %p\n", g->scan, g->to_space_next, g->to_space + g->size);
+  printf("BOUNDARIES  | FROM: %p | TO: %p | TOTAL: %d bytes\n", g->from_space, g->from_space + g->size, g->size);
+  printf("FREE MEMORY | FROM: %p | TO: %p | TOTAL: %ld bytes\n",
+    g->from_space_next,
+    g->from_space + g->size,
+    g->from_space + g->size - g->from_space_next);
+  printf("SCAN: %p, NEXT: %p, LIMIT: %p\n", g->scan, g->to_space_next, g->to_space + g->size);
+
+  print_separator();
 }
 
 void* try_alloc(struct generation* g, const size_t size_in_bytes) {
@@ -242,6 +246,14 @@ void* forward(struct generation* g, stella_object* p) {
 }
 
 void collect(struct generation* g) {
+  g->collect_count++;
+
+#ifdef DEBUG_LOGS
+  print_separator();
+  printf("COLLECTING G_%d - COLLECTING NUMBER %d\n", g->number, g->collect_count);
+  print_separator();
+#endif
+
   g->scan = g->to_space_next;
 
   for (int i = 0; i < gc_roots_top; i++) {
@@ -278,14 +290,12 @@ void alloc_stat_update(const size_t size_in_bytes) {
 
 void gc_collect() {
 #ifdef DEBUG_LOGS
-  printf("GC before:\n");
   print_gc_state();
 #endif
 
   collect(&g0);
 
 #ifdef DEBUG_LOGS
-  printf("GC after:\n");
   print_gc_state();
 #endif
 }

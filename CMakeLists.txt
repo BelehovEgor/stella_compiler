@@ -7,6 +7,5 @@ add_executable(kkuk
         stella/gc.c
         stella/runtime.c
         tests/return_argument.c
-        tests/very-purely-functional.c
-        tests/fibonacci.c
+        tests/fibbonachi.c
 )

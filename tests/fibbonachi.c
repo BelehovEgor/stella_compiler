@@ -66,6 +66,10 @@ stella_object *_stella_id__stella_cls_1(stella_object *closure, stella_object *_
 }
 stella_object *_fn__stella_id_helper(stella_object *_cls, stella_object *_stella_id_p) {
   stella_object *_stella_reg_1, *_stella_reg_2, *_stella_reg_3, *_stella_reg_4;
+  gc_push_root((void**)&_stella_reg_1);
+  gc_push_root((void**)&_stella_reg_2);
+  gc_push_root((void**)&_stella_reg_3);
+  gc_push_root((void**)&_stella_reg_4);
   #ifdef STELLA_DEBUG
   printf("[debug] call function helper(");
   printf("p = "); print_stella_object(_stella_id_p);
@@ -81,12 +85,20 @@ stella_object *_fn__stella_id_helper(stella_object *_cls, stella_object *_stella
   _stella_reg_3 = _stella_reg_4;
   _stella_reg_1 = stella_object_nat_rec(_stella_reg_1, _stella_reg_2, _stella_reg_3);
   gc_pop_root((void**)&_stella_id_p);
+  gc_pop_root((void**)&_stella_reg_4);
+  gc_pop_root((void**)&_stella_reg_3);
+  gc_pop_root((void**)&_stella_reg_2);
+  gc_pop_root((void**)&_stella_reg_1);
   return _stella_reg_1;
 }
 stella_object_1 _cls__stella_id_helper = { .object_header = TAG_FN, .object_fields = { &_fn__stella_id_helper } } ;
 stella_object *_stella_id_helper = (stella_object *)&_cls__stella_id_helper;
 stella_object *_fn__stella_id_fib(stella_object *_cls, stella_object *_stella_id_n) {
   stella_object *_stella_reg_1, *_stella_reg_2, *_stella_reg_3, *_stella_reg_4;
+  gc_push_root((void**)&_stella_reg_1);
+  gc_push_root((void**)&_stella_reg_2);
+  gc_push_root((void**)&_stella_reg_3);
+  gc_push_root((void**)&_stella_reg_4);
   #ifdef STELLA_DEBUG
   printf("[debug] call function fib(");
   printf("n = "); print_stella_object(_stella_id_n);
@@ -103,12 +115,18 @@ stella_object *_fn__stella_id_fib(stella_object *_cls, stella_object *_stella_id
   _stella_reg_1 = STELLA_OBJECT_READ_FIELD(_stella_reg_1, 1);
   _stella_reg_1 = _stella_reg_1;
   gc_pop_root((void**)&_stella_id_n);
+  gc_pop_root((void**)&_stella_reg_4);
+  gc_pop_root((void**)&_stella_reg_3);
+  gc_pop_root((void**)&_stella_reg_2);
+  gc_pop_root((void**)&_stella_reg_1);
   return _stella_reg_1;
 }
 stella_object_1 _cls__stella_id_fib = { .object_header = TAG_FN, .object_fields = { &_fn__stella_id_fib } } ;
 stella_object *_stella_id_fib = (stella_object *)&_cls__stella_id_fib;
 stella_object *_fn__stella_id_main(stella_object *_cls, stella_object *_stella_id_n) {
   stella_object *_stella_reg_1, *_stella_reg_2;
+  gc_push_root((void**)&_stella_reg_1);
+  gc_push_root((void**)&_stella_reg_2);
   #ifdef STELLA_DEBUG
   printf("[debug] call function main(");
   printf("n = "); print_stella_object(_stella_id_n);
@@ -119,6 +137,8 @@ stella_object *_fn__stella_id_main(stella_object *_cls, stella_object *_stella_i
   _stella_reg_2 = _stella_id_n;
   _stella_reg_1 = (*(stella_object *(*)(stella_object *, stella_object *))STELLA_OBJECT_READ_FIELD(_stella_reg_1, 0))(_stella_reg_1, _stella_reg_2);
   gc_pop_root((void**)&_stella_id_n);
+  gc_pop_root((void**)&_stella_reg_2);
+  gc_pop_root((void**)&_stella_reg_1);
   return _stella_reg_1;
 }
 stella_object_1 _cls__stella_id_main = { .object_header = TAG_FN, .object_fields = { &_fn__stella_id_main } } ;
@@ -135,3 +155,4 @@ int main(int argc, char **argv) {
   print_stella_stats();
   return 0;
 }
+
