@@ -21,7 +21,7 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (16 * 128)
+#define MAX_ALLOC_SIZE (16 * 512)
 #define DEBUG_LOGS
 
 int gc_roots_max_size = 0;
@@ -30,7 +30,6 @@ void **gc_roots[MAX_GC_ROOTS];
 
 void init_generation();
 void alloc_stat_update(size_t size_in_bytes);
-bool is_in_heap(const void* ptr, const void* heap, size_t heap_size);
 void gc_collect();
 int get_size(const stella_object *obj);
 
@@ -40,13 +39,14 @@ struct generation {
   int size;
   void* from_space_next;
   void* from_space;
+
   void* to_space;
   void* to_space_next;
+
   void* scan;
 } g0;
 
 void print_state(const struct generation* g);
-bool is_here(const struct generation* g, const void* ptr);
 void* try_alloc(struct generation* g, size_t size_in_bytes);
 
 void* gc_alloc(const size_t size_in_bytes) {
@@ -144,8 +144,12 @@ bool is_in_heap(const void* ptr, const void* heap, const size_t heap_size) {
   return ptr >= heap && ptr < heap + heap_size;
 }
 
-bool is_here(const struct generation* g, const void* ptr) {
+bool is_from_place(const struct generation* g, const void* ptr) {
   return is_in_heap(ptr, g->from_space, g->size);
+}
+
+bool is_to_space(const struct generation* g, const void* ptr) {
+  return is_in_heap(ptr, g->to_space, g->size);
 }
 
 bool has_enough_space(const struct generation* g, const size_t heap_size) {
@@ -213,8 +217,8 @@ void chase(struct generation* g, stella_object *p) {
       q->object_fields[i] = p->object_fields[i];
 
       stella_object *potentially_forwarded = q->object_fields[i];
-      if (is_here(g, q->object_fields[i]) &&
-          !is_in_heap(potentially_forwarded->object_fields[0], g->to_space, g->size)) {
+      if (is_from_place(g, q->object_fields[i]) &&
+          !is_to_space(g, potentially_forwarded->object_fields[0])) {
         r = potentially_forwarded;
       }
     }
@@ -225,11 +229,11 @@ void chase(struct generation* g, stella_object *p) {
 }
 
 void* forward(struct generation* g, stella_object* p) {
-  if (!is_here(&g0, p)) {
+  if (!is_from_place(&g0, p)) {
     return p;
   }
 
-  if (is_in_heap(p->object_fields[0], g->to_space, MAX_ALLOC_SIZE)) {
+  if (is_to_space(g, p->object_fields[0])) {
     return p->object_fields[0];
   }
 
