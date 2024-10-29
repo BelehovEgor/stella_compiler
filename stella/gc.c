@@ -21,7 +21,7 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (16 * 80)
+#define MAX_ALLOC_SIZE (16 * 128)
 #define DEBUG_LOGS
 
 int gc_roots_max_size = 0;
@@ -45,8 +45,8 @@ struct generation {
   void* scan;
 } g0;
 
-void print_state(struct generation* g);
-bool is_here(struct generation* g, const void* ptr);
+void print_state(const struct generation* g);
+bool is_here(const struct generation* g, const void* ptr);
 void* try_alloc(struct generation* g, size_t size_in_bytes);
 
 void* gc_alloc(const size_t size_in_bytes) {
@@ -63,18 +63,10 @@ void* gc_alloc(const size_t size_in_bytes) {
     alloc_stat_update(size_in_bytes);
   } else {
     printf("Out of memory!");
-    exit(1); // выход? как обрабатывать отсутствие памяти
+    exit(137); // выход? как обрабатывать отсутствие памяти
   }
 
   return result;
-}
-
-void print_gc_roots() {
-  printf("ROOTS: ");
-  for (int i = 0; i < gc_roots_top; i++) {
-    printf("%p ", gc_roots[i]);
-  }
-  printf("\n");
 }
 
 void print_separator() {
@@ -86,11 +78,11 @@ void print_gc_alloc_stats() {
   printf("STATS");
   print_separator();
 
-  printf("Total memory allocation: %d bytes (%d objects)\n", total_allocated_bytes, total_allocated_objects);
+  printf("Total memory allocation:  %d bytes (%d objects)\n", total_allocated_bytes, total_allocated_objects);
   printf("Total garbage collecting: %d\n", total_gc_collect);
-  printf("Maximum residency:       %d bytes (%d objects)\n", max_allocated_bytes, max_allocated_objects);
-  printf("Total memory use:        %d reads and %d writes\n", total_reads, total_writes);
-  printf("Max GC roots stack size: %d roots\n", gc_roots_max_size);
+  printf("Maximum residency:        %d bytes (%d objects)\n", max_allocated_bytes, max_allocated_objects);
+  printf("Total memory use:         %d reads and %d writes\n", total_reads, total_writes);
+  printf("Max GC roots stack size:  %d roots\n", gc_roots_max_size);
 
   print_separator();
 }
@@ -152,11 +144,11 @@ bool is_in_heap(const void* ptr, const void* heap, const size_t heap_size) {
   return ptr >= heap && ptr < heap + heap_size;
 }
 
-bool is_here(struct generation* g, const void* ptr) {
+bool is_here(const struct generation* g, const void* ptr) {
   return is_in_heap(ptr, g->from_space, g->size);
 }
 
-bool has_enough_space(struct generation* g, const size_t heap_size) {
+bool has_enough_space(const struct generation* g, const size_t heap_size) {
   return g->from_space_next + heap_size <= g->from_space + g->size;
 }
 
@@ -167,7 +159,7 @@ void* get_space(struct generation* g, const size_t size) {
   return result;
 }
 
-void print_state(struct generation* g) {
+void print_state(const struct generation* g) {
   print_separator();
   printf("G_%d STATE\n", g->number);
   print_separator();
@@ -233,7 +225,7 @@ void chase(struct generation* g, stella_object *p) {
 }
 
 void* forward(struct generation* g, stella_object* p) {
-  if (!is_in_heap(p, g->from_space, MAX_ALLOC_SIZE)) {
+  if (!is_here(&g0, p)) {
     return p;
   }
 
@@ -247,6 +239,7 @@ void* forward(struct generation* g, stella_object* p) {
 
 void collect(struct generation* g) {
   g->collect_count++;
+  gc_collect_stat_update();
 
 #ifdef DEBUG_LOGS
   print_separator();
@@ -277,8 +270,6 @@ void collect(struct generation* g) {
 
   g->from_space_next = g->to_space_next;
   g->to_space_next = g->to_space;
-
-  gc_collect_stat_update();
 }
 
 void alloc_stat_update(const size_t size_in_bytes) {
