@@ -21,24 +21,23 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (16 * 512)
+#define MAX_ALLOC_SIZE (16 * 200)
+#define MAX_CHANGED_NODES 1024
 #define DEBUG_LOGS
 
 int gc_roots_max_size = 0;
 int gc_roots_top = 0;
 void **gc_roots[MAX_GC_ROOTS];
 
-void init_generation();
-void alloc_stat_update(size_t size_in_bytes);
-void gc_collect();
-int get_size(const stella_object *obj);
+int changed_nodes_top = 0;
+void *changed_nodes[MAX_CHANGED_NODES];
 
 struct space {
   int gen;
   int size;
   void* next;
   void* heap;
-} g0_space_from, g0_space_to;
+} g0_space_from, g1_space_from, g1_space_to;
 
 struct generation {
   int number;
@@ -48,10 +47,18 @@ struct generation {
   struct space* to;
 
   void* scan;
-} g0;
+} g0, g1;
 
+int generation_count = 2;
+struct generation* generations[] = { &g0, &g1 };
+
+void init_generation();
+void alloc_stat_update(size_t size_in_bytes);
+void gc_collect();
+int get_size(const stella_object *obj);
 void print_state(const struct generation* g);
 void* try_alloc(struct generation* g, size_t size_in_bytes);
+bool is_in_place(const struct space* space, const void* ptr);
 
 void* gc_alloc(const size_t size_in_bytes) {
   init_generation();
@@ -91,20 +98,31 @@ void print_gc_alloc_stats() {
   print_separator();
 }
 
-void print_gc_state() {
-  print_state(&g0);
-
+void print_root_state() {
   printf("ROOTS:\n");
   print_separator();
+
   for (int i = 0; i < gc_roots_top; i++) {
     printf(
-      "\tIDX: %d, ADDRESS: %p, VALUE: %p\n",
+      "\tIDX: %d, ADDRESS: %p, FROM: %s, VALUE: %p, \n",
       i,
       gc_roots[i],
-      *gc_roots[i]);
+      is_in_place(&g0_space_from, *gc_roots[i])
+        ? "  G_0"
+        : is_in_place(&g1_space_from, *gc_roots[i])
+          ? "  G_1"
+          : "OTHER",
+      *gc_roots[i]
+    );
   }
 
   print_separator();
+}
+
+void print_gc_state() {
+  print_state(&g0);
+  print_state(&g1);
+  print_root_state();
 }
 
 void gc_read_barrier(void *object, int field_index) {
@@ -113,6 +131,9 @@ void gc_read_barrier(void *object, int field_index) {
 
 void gc_write_barrier(void *object, int field_index, void *contents) {
   total_writes += 1;
+
+  changed_nodes[changed_nodes_top] = object;
+  changed_nodes_top++;
 }
 
 void gc_push_root(void **ptr){
@@ -134,14 +155,23 @@ void init_generation() {
   g0_space_from.heap = malloc(MAX_ALLOC_SIZE);
   g0_space_from.next = g0_space_from.heap;
 
-  g0_space_to.gen = 0;
-  g0_space_to.size = MAX_ALLOC_SIZE;
-  g0_space_to.heap = malloc(MAX_ALLOC_SIZE);
-  g0_space_to.next = g0_space_to.heap;
+  const int g1_space_size = MAX_ALLOC_SIZE * 2;
+  g1_space_from.gen = 1;
+  g1_space_from.size = g1_space_size;
+  g1_space_from.heap = malloc(g1_space_size);
+  g1_space_from.next = g1_space_from.heap;
+  g1_space_to.gen = 1;
+  g1_space_to.size = g1_space_size;
+  g1_space_to.heap = malloc(g1_space_size);
+  g1_space_to.next = g1_space_to.heap;
 
   g0.number = 0;
   g0.from = &g0_space_from;
-  g0.to = &g0_space_to;
+  g0.to = &g1_space_from;
+
+  g1.number = 1;
+  g1.from = &g1_space_from;
+  g1.to = &g1_space_to;
 }
 
 void gc_collect_stat_update() {
@@ -198,7 +228,7 @@ void print_state(const struct generation* g) {
 }
 
 void* alloc_in_space(struct space* space, const size_t size_in_bytes) {
-  if (has_enough_space(space, size_in_bytes)) {
+  if (has_enough_space(space, size_in_bytes + sizeof(void*))) {
     void *result = space->next;
     space->next += size_in_bytes;
 
@@ -212,13 +242,13 @@ void* try_alloc(struct generation* g, const size_t size_in_bytes) {
   return alloc_in_space(g->from, size_in_bytes);
 }
 
-void chase(struct generation* g, stella_object *p) {
+void collect(struct generation* g);
+
+stella_object* chase(struct generation* g, stella_object *p) {
   do {
     stella_object *q = alloc_in_space(g->to, get_size(p));
     if (q == NULL) {
-      // todo collect next gen and try alloc again
-      // now it is impossible
-      return;
+      return p;
     }
 
     const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(p->object_header);
@@ -238,6 +268,8 @@ void chase(struct generation* g, stella_object *p) {
     p->object_fields[0] = q;
     p = r;
   } while (p != NULL);
+
+  return NULL;
 }
 
 void* forward(struct generation* g, stella_object* p) {
@@ -249,7 +281,15 @@ void* forward(struct generation* g, stella_object* p) {
     return p->object_fields[0];
   }
 
-  chase(g, p);
+  stella_object* not_chased = chase(g, p);
+  if (not_chased != NULL) {
+    collect(generations[g->to->gen]);
+
+    not_chased = chase(g, not_chased);
+    if (not_chased != NULL) {
+      exit(137); // todo
+    }
+  }
   return p->object_fields[0];
 }
 
@@ -260,7 +300,8 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("COLLECTING G_%d - COLLECTING NUMBER %d\n", g->number, g->collect_count);
-  print_separator();
+  print_state(g);
+  print_root_state();
 #endif
 
   g->scan = g->to->next;
@@ -268,6 +309,29 @@ void collect(struct generation* g) {
   for (int i = 0; i < gc_roots_top; i++) {
     void **root_ptr = gc_roots[i];
     *root_ptr = forward(g, *root_ptr);
+  }
+
+  // run for all objects in prev generations and try find link to collected generation
+  for (int i = 0; i < g->number; i++) {
+    const struct generation* past_gen = generations[i];
+
+    for (stella_object *obj = past_gen->from->heap; obj < past_gen->from->next; obj += get_size(obj)) {
+      const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
+      for (int j = 0; j < field_count; j++) {
+        obj->object_fields[j] = forward(g, obj->object_fields[j]);
+      }
+    }
+  }
+
+  // changed objects
+  for (int i = 0; i < changed_nodes_top; i++) {
+    stella_object *obj = changed_nodes[i];
+    const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
+    for (int j = 0; j < field_count; j++) {
+      obj->object_fields[j] = forward(g, obj->object_fields[j]);
+    }
+
+    changed_nodes_top = 0;
   }
 
   while (g->scan < g->to->next) {
@@ -280,14 +344,20 @@ void collect(struct generation* g) {
     g->scan += get_size(obj);
   }
 
-  if (g->from->gen == g->to->gen) {
+  if (g->from->gen == g->to->gen) { // copiyng gc
     void *buff = g->from;
     g->from = g->to;
     g->to = buff;
 
     g->to->next = g->to->heap;
-  } else { // todo not impossible
-    g->from->next = g->from->heap;
+
+    struct generation* past = generations[g->from->gen - 1];
+    past->to = g->from;
+  } else { // generations
+    struct generation* current = generations[g->from->gen];
+    const struct generation* next = generations[g->to->gen];
+    current->from->next = g->from->heap;
+    current->to = next->from;
   }
 }
 
@@ -299,13 +369,10 @@ void alloc_stat_update(const size_t size_in_bytes) {
 }
 
 void gc_collect() {
-#ifdef DEBUG_LOGS
-  print_gc_state();
-#endif
-
   collect(&g0);
 
 #ifdef DEBUG_LOGS
+  printf("AFTER COLLECTING\n");
   print_gc_state();
 #endif
 }
