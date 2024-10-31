@@ -33,15 +33,19 @@ void alloc_stat_update(size_t size_in_bytes);
 void gc_collect();
 int get_size(const stella_object *obj);
 
+struct space {
+  int gen;
+  int size;
+  void* next;
+  void* heap;
+} g0_space_from, g0_space_to;
+
 struct generation {
   int number;
   int collect_count;
-  int size;
-  void* from_space_next;
-  void* from_space;
 
-  void* to_space;
-  void* to_space_next;
+  struct space* from;
+  struct space* to;
 
   void* scan;
 } g0;
@@ -123,17 +127,21 @@ void gc_pop_root(void **ptr){
 // private
 
 void init_generation() {
-  if (g0.from_space != NULL) return;
+  if (g0.from != NULL) return;
 
-  void* g0_from_space = malloc(MAX_ALLOC_SIZE);
-  void* g0_to_space = malloc(MAX_ALLOC_SIZE);
+  g0_space_from.gen = 0;
+  g0_space_from.size = MAX_ALLOC_SIZE;
+  g0_space_from.heap = malloc(MAX_ALLOC_SIZE);
+  g0_space_from.next = g0_space_from.heap;
+
+  g0_space_to.gen = 0;
+  g0_space_to.size = MAX_ALLOC_SIZE;
+  g0_space_to.heap = malloc(MAX_ALLOC_SIZE);
+  g0_space_to.next = g0_space_to.heap;
 
   g0.number = 0;
-  g0.size = MAX_ALLOC_SIZE;
-  g0.from_space = g0_from_space;
-  g0.from_space_next = g0_from_space;
-  g0.to_space = g0_to_space;
-  g0.to_space_next = g0_to_space;
+  g0.from = &g0_space_from;
+  g0.to = &g0_space_to;
 }
 
 void gc_collect_stat_update() {
@@ -144,23 +152,12 @@ bool is_in_heap(const void* ptr, const void* heap, const size_t heap_size) {
   return ptr >= heap && ptr < heap + heap_size;
 }
 
-bool is_from_place(const struct generation* g, const void* ptr) {
-  return is_in_heap(ptr, g->from_space, g->size);
+bool is_in_place(const struct space* space, const void* ptr) {
+  return is_in_heap(ptr, space->heap, space->size);
 }
 
-bool is_to_space(const struct generation* g, const void* ptr) {
-  return is_in_heap(ptr, g->to_space, g->size);
-}
-
-bool has_enough_space(const struct generation* g, const size_t heap_size) {
-  return g->from_space_next + heap_size <= g->from_space + g->size;
-}
-
-void* get_space(struct generation* g, const size_t size) {
-  void *result = g->from_space_next;
-  g->from_space_next += size;
-
-  return result;
+bool has_enough_space(const struct space* space, const size_t requested_size) {
+  return space->next + requested_size <= space->heap + space->size;
 }
 
 void print_state(const struct generation* g) {
@@ -170,7 +167,7 @@ void print_state(const struct generation* g) {
 
   printf("COLLECT COUNT %d\n", g->collect_count);
   printf("OBJECTS:\n");
-  for (void *start = g->from_space; start < g->from_space_next; start += get_size(start)) {
+  for (void *start = g->from->heap; start < g->from->next; start += get_size(start)) {
     stella_object *st_obj = start;
     const int tag = STELLA_OBJECT_HEADER_TAG(st_obj->object_header);
     printf("\tADDRESS: %p | TAG: %d | FIELDS: ", st_obj, tag);
@@ -187,29 +184,44 @@ void print_state(const struct generation* g) {
   }
 
   // Кол-во выделенной памяти
-  printf("BOUNDARIES  | FROM: %p | TO: %p | TOTAL: %d bytes\n", g->from_space, g->from_space + g->size, g->size);
+  printf("BOUNDARIES  | FROM: %p | TO: %p | TOTAL: %d bytes\n",
+    g->from->heap,
+    g->from->heap + g->from->size,
+    g->from->size);
   printf("FREE MEMORY | FROM: %p | TO: %p | TOTAL: %ld bytes\n",
-    g->from_space_next,
-    g->from_space + g->size,
-    g->from_space + g->size - g->from_space_next);
-  printf("SCAN: %p, NEXT: %p, LIMIT: %p\n", g->scan, g->to_space_next, g->to_space + g->size);
+    g->from->next,
+    g->from->heap + g->from->size,
+    g->from->heap + g->from->size - g->from->next);
+  printf("SCAN: %p, NEXT: %p, LIMIT: %p\n", g->scan, g->scan, g->to->next + g->to->size);
 
   print_separator();
 }
 
-void* try_alloc(struct generation* g, const size_t size_in_bytes) {
-  if (has_enough_space(g, size_in_bytes)) {
-    return get_space(g, size_in_bytes);
+void* alloc_in_space(struct space* space, const size_t size_in_bytes) {
+  if (has_enough_space(space, size_in_bytes)) {
+    void *result = space->next;
+    space->next += size_in_bytes;
+
+    return result;
   }
 
   return NULL;
 }
 
+void* try_alloc(struct generation* g, const size_t size_in_bytes) {
+  return alloc_in_space(g->from, size_in_bytes);
+}
+
 void chase(struct generation* g, stella_object *p) {
   do {
-    stella_object *q = g->to_space_next;
+    stella_object *q = alloc_in_space(g->to, get_size(p));
+    if (q == NULL) {
+      // todo collect next gen and try alloc again
+      // now it is impossible
+      return;
+    }
+
     const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(p->object_header);
-    g->to_space_next += get_size(p);
     void *r = NULL;
 
     q->object_header = p->object_header;
@@ -217,8 +229,8 @@ void chase(struct generation* g, stella_object *p) {
       q->object_fields[i] = p->object_fields[i];
 
       stella_object *potentially_forwarded = q->object_fields[i];
-      if (is_from_place(g, q->object_fields[i]) &&
-          !is_to_space(g, potentially_forwarded->object_fields[0])) {
+      if (is_in_place(g->from, q->object_fields[i]) &&
+          !is_in_place(g->to, potentially_forwarded->object_fields[0])) {
         r = potentially_forwarded;
       }
     }
@@ -229,11 +241,11 @@ void chase(struct generation* g, stella_object *p) {
 }
 
 void* forward(struct generation* g, stella_object* p) {
-  if (!is_from_place(&g0, p)) {
+  if (!is_in_place(g->from, p)) {
     return p;
   }
 
-  if (is_to_space(g, p->object_fields[0])) {
+  if (is_in_place(g->to, p->object_fields[0])) {
     return p->object_fields[0];
   }
 
@@ -251,14 +263,14 @@ void collect(struct generation* g) {
   print_separator();
 #endif
 
-  g->scan = g->to_space_next;
+  g->scan = g->to->next;
 
   for (int i = 0; i < gc_roots_top; i++) {
     void **root_ptr = gc_roots[i];
     *root_ptr = forward(g, *root_ptr);
   }
 
-  while (g->scan < g->to_space_next) {
+  while (g->scan < g->to->next) {
     stella_object *obj = g->scan;
     const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
     for (int i = 0; i < field_count; i++) {
@@ -268,12 +280,15 @@ void collect(struct generation* g) {
     g->scan += get_size(obj);
   }
 
-  void *buff = g->from_space;
-  g->from_space = g->to_space;
-  g->to_space = buff;
+  if (g->from->gen == g->to->gen) {
+    void *buff = g->from;
+    g->from = g->to;
+    g->to = buff;
 
-  g->from_space_next = g->to_space_next;
-  g->to_space_next = g->to_space;
+    g->to->next = g->to->heap;
+  } else { // todo not impossible
+    g->from->next = g->from->heap;
+  }
 }
 
 void alloc_stat_update(const size_t size_in_bytes) {

@@ -8,4 +8,5 @@ add_executable(kkuk
         stella/runtime.c
         tests/return_argument.c
         tests/fibbonachi.c
+        tests/factorial-pure.c
 )
