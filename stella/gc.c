@@ -153,9 +153,9 @@ void print_gc_roots() {
       "\tIDX: %d, ADDRESS: %p, FROM: %s, VALUE: %p, \n",
       i,
       gc_roots[i],
-      is_in_place(&g0_space_from, *gc_roots[i])
+      is_in_place(g0.from, *gc_roots[i])
         ? "  G_0"
-        : is_in_place(&g1_space_from, *gc_roots[i])
+        : is_in_place(g1.from, *gc_roots[i])
           ? "  G_1"
           : "OTHER",
       *gc_roots[i]
@@ -255,7 +255,7 @@ bool has_enough_space(const struct space* space, const size_t requested_size) {
 }
 
 struct gc_object* alloc_in_space(struct space* space, const size_t size_in_bytes) {
-  const int size = size_in_bytes + sizeof(void*);
+  const size_t size = size_in_bytes + sizeof(void*);
   if (has_enough_space(space, size)) {
     struct gc_object *result = space->next;
     result->moved_to = NULL;
@@ -268,6 +268,36 @@ struct gc_object* alloc_in_space(struct space* space, const size_t size_in_bytes
   return NULL;
 }
 
+void print_space(const struct space* space) {
+  printf("OBJECTS:\n");
+  for (void *start = space->heap; start < space->next; start += get_gc_object_size(start)) {
+      const struct gc_object *gc_ptr = start;
+      const int tag = STELLA_OBJECT_HEADER_TAG(gc_ptr->stella_object.object_header);
+      printf("\tADDRESS: %p | TAG: %d | FIELDS: ", start + sizeof(void*), tag);
+
+      const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(gc_ptr->stella_object.object_header);
+      for (int i = 0; i < field_count; i++) {
+          printf("%p", gc_ptr->stella_object.object_fields[i]);
+          if (i < field_count - 1) {
+              printf(", ");
+          }
+      }
+
+      printf("\n");
+  }
+
+  // Кол-во выделенной памяти
+  printf("BOUNDARIES  | FROM: %p | TO: %p | TOTAL: %d bytes\n",
+         space->heap,
+         space->heap + space->size,
+         space->size);
+  printf("FREE MEMORY | FROM: %p | TO: %p | TOTAL: %ld bytes\n",
+         space->next,
+         space->heap + space->size,
+         space->heap + space->size - space->next);
+
+}
+
 // generation
 void print_state(const struct generation* g) {
   print_separator();
@@ -275,32 +305,7 @@ void print_state(const struct generation* g) {
   print_separator();
 
   printf("COLLECT COUNT %d\n", g->collect_count);
-  printf("OBJECTS:\n");
-  for (void *start = g->from->heap; start < g->from->next; start += get_gc_object_size(start)) {
-    const struct gc_object *gc_ptr = start;
-    const int tag = STELLA_OBJECT_HEADER_TAG(gc_ptr->stella_object.object_header);
-    printf("\tADDRESS: %p | TAG: %d | FIELDS: ", start + sizeof(void*), tag);
-
-    const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(gc_ptr->stella_object.object_header);
-    for (int i = 0; i < field_count; i++) {
-      printf("%p", gc_ptr->stella_object.object_fields[i]);
-      if (i < field_count - 1) {
-        printf(", ");
-      }
-    }
-
-    printf("\n");
-  }
-
-  // Кол-во выделенной памяти
-  printf("BOUNDARIES  | FROM: %p | TO: %p | TOTAL: %d bytes\n",
-    g->from->heap,
-    g->from->heap + g->from->size,
-    g->from->size);
-  printf("FREE MEMORY | FROM: %p | TO: %p | TOTAL: %ld bytes\n",
-    g->from->next,
-    g->from->heap + g->from->size,
-    g->from->heap + g->from->size - g->from->next);
+  print_space(g->from);
   printf("SCAN: %p, NEXT: %p, LIMIT: %p\n", g->scan, g->scan, g->to->next + g->to->size);
 
   print_separator();
