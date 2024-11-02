@@ -21,7 +21,7 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (24 * 20)
+#define MAX_ALLOC_SIZE (24 * 8)
 #define MAX_CHANGED_NODES 1024
 #define DEBUG_LOGS
 
@@ -76,6 +76,7 @@ stella_object* get_stella_object(struct gc_object* gc_ptr);
 bool is_in_place(const struct space* space, const void* ptr);
 bool has_enough_space(const struct space* space, size_t requested_size);
 struct gc_object* alloc_in_space(struct space* space, size_t size_in_bytes);
+void print_space(const struct space* space);
 
 // generation
 void print_state(const struct generation* g);
@@ -126,7 +127,7 @@ void gc_pop_root(void **ptr){
 
 void print_gc_alloc_stats() {
   print_separator();
-  printf("STATS");
+  printf("STATS\n");
   print_separator();
 
   printf("Total memory allocation:  %d bytes (%d objects)\n", total_allocated_bytes, total_allocated_objects);
@@ -150,13 +151,13 @@ void print_gc_roots() {
 
   for (int i = 0; i < gc_roots_top; i++) {
     printf(
-      "\tIDX: %d, ADDRESS: %p, FROM: %s, VALUE: %p, \n",
+      "\tIDX: %-5d | ADDRESS: %-15p | FROM: %-5s | VALUE: %-15p\n",
       i,
       gc_roots[i],
       is_in_place(g0.from, *gc_roots[i])
-        ? "  G_0"
+        ? "G_0"
         : is_in_place(g1.from, *gc_roots[i])
-          ? "  G_1"
+          ? "G_1"
           : "OTHER",
       *gc_roots[i]
     );
@@ -273,13 +274,17 @@ void print_space(const struct space* space) {
   for (void *start = space->heap; start < space->next; start += get_gc_object_size(start)) {
       const struct gc_object *gc_ptr = start;
       const int tag = STELLA_OBJECT_HEADER_TAG(gc_ptr->stella_object.object_header);
-      printf("\tADDRESS: %p | TAG: %d | FIELDS: ", start + sizeof(void*), tag);
+      printf("\tGC ADDRESS: %-15p | ST ADDRESS: %-15p | MOVED: %-15p | TAG: %-2d | FIELDS: ",
+             gc_ptr,
+             &gc_ptr->stella_object,
+             gc_ptr->moved_to,
+             tag);
 
       const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(gc_ptr->stella_object.object_header);
       for (int i = 0; i < field_count; i++) {
-          printf("%p", gc_ptr->stella_object.object_fields[i]);
+          printf("%-15p", gc_ptr->stella_object.object_fields[i]);
           if (i < field_count - 1) {
-              printf(", ");
+              printf(" ");
           }
       }
 
@@ -287,11 +292,11 @@ void print_space(const struct space* space) {
   }
 
   // Кол-во выделенной памяти
-  printf("BOUNDARIES  | FROM: %p | TO: %p | TOTAL: %d bytes\n",
+  printf("BOUNDARIES  | FROM: %-15p | TO: %-15p | TOTAL: %d bytes\n",
          space->heap,
          space->heap + space->size,
          space->size);
-  printf("FREE MEMORY | FROM: %p | TO: %p | TOTAL: %ld bytes\n",
+  printf("FREE MEMORY | FROM: %-15p | TO: %-15p | TOTAL: %ld bytes\n",
          space->next,
          space->heap + space->size,
          space->heap + space->size - space->next);
@@ -306,7 +311,13 @@ void print_state(const struct generation* g) {
 
   printf("COLLECT COUNT %d\n", g->collect_count);
   print_space(g->from);
-  printf("SCAN: %p, NEXT: %p, LIMIT: %p\n", g->scan, g->scan, g->to->next + g->to->size);
+
+#ifdef DEBUG_LOGS
+  printf("TO SPACE\n");
+  print_space(g->to);
+#endif
+
+  printf("SCAN: %-15p | NEXT: %-15p | LIMIT: %-15p\n", g->scan, g->scan, g->to->next + g->to->size);
 
   print_separator();
 }
@@ -396,6 +407,13 @@ void collect(struct generation* g) {
     *root_ptr = forward(g, *root_ptr);
   }
 
+#ifdef DEBUG_LOGS
+  print_separator();
+  printf("FORWARD ALL ROOTS\n");
+  print_state(g);
+  print_gc_roots();
+#endif
+
   // run for all objects in prev generations and try find link to collected generation
   for (int i = 0; i < g->number; i++) {
     const struct generation* past_gen = generations[i];
@@ -409,6 +427,13 @@ void collect(struct generation* g) {
     }
   }
 
+#ifdef DEBUG_LOGS
+  print_separator();
+  printf("FORWARD FIELDS OF OBJECT FROM EARLY GEN\n");
+  print_state(g);
+  print_gc_roots();
+#endif
+
   // changed objects
   for (int i = 0; i < changed_nodes_top; i++) {
     stella_object *obj = changed_nodes[i];
@@ -420,6 +445,13 @@ void collect(struct generation* g) {
     changed_nodes_top = 0;
   }
 
+#ifdef DEBUG_LOGS
+  print_separator();
+  printf("FORWARD CHANGED OBJECT FIELDS\n");
+  print_state(g);
+  print_gc_roots();
+#endif
+
   while (g->scan < g->to->next) {
     struct gc_object *obj = g->scan;
     const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->stella_object.object_header);
@@ -429,6 +461,13 @@ void collect(struct generation* g) {
 
     g->scan += get_gc_object_size(obj);
   }
+
+#ifdef DEBUG_LOGS
+  print_separator();
+  printf("SCAN TO NEXT\n");
+  print_state(g);
+  print_gc_roots();
+#endif
 
   if (g->from->gen == g->to->gen) { // copiyng gc
     void *buff = g->from;
@@ -445,4 +484,11 @@ void collect(struct generation* g) {
     current->from->next = g->from->heap;
     current->to = next->from;
   }
+
+#ifdef DEBUG_LOGS
+  print_separator();
+  printf("END OF COLLECTING\n");
+  print_state(g);
+  print_gc_roots();
+#endif
 }
