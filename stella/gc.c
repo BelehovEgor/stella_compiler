@@ -7,6 +7,7 @@
 
 /** Total allocated number of bytes (over the entire duration of the program). */
 int total_allocated_bytes = 0;
+int total_requested_bytes = 0;
 
 /** Total allocated number of objects (over the entire duration of the program). */
 int total_allocated_objects = 0;
@@ -20,68 +21,96 @@ int total_writes = 0;
 /** Total count gc collect (over the entire duration of the program). */
 int total_gc_collect = 0;
 
-#define MAX_GC_ROOTS 1024
+
 #define MAX_ALLOC_SIZE (24 * 64)
-#define MAX_CHANGED_NODES 1024
+#define GEN_SIZE_MULTIPLIER 4
 #define DEBUG_LOGS
 
+#define MAX_GC_ROOTS 1024
 int gc_roots_max_size = 0;
 int gc_roots_top = 0;
 void **gc_roots[MAX_GC_ROOTS];
 
+#define MAX_CHANGED_NODES 1024
 int changed_nodes_top = 0;
 void *changed_nodes[MAX_CHANGED_NODES];
 
+/** Обертка на каждый stella-объект. Содержит кастомный заголовок */
 struct gc_object {
-  void* moved_to;
-  stella_object stella_object;
+  void* moved_to; /** Указатель на место, куда в процессе forward был перемещен объект */
+  stella_object stella_object; /** Запрошенный объект */
 };
 
+/** Структура содержащая всю информацию о одной части памяти (from/to) */
 struct space {
-  int gen;
-  int size;
-  void* next;
-  void* heap;
+  int gen; /** Маркер принадлежности к поколению */
+  int size; /** Размер выделенного куска памяти */
+  void* next; /** Указатель на первый свободный байт */
+  void* heap; /** Указатель на начало выделенного куска памяти */
 } g0_space_from, g1_space_from, g1_space_to;
 
+/** Структура поколения */
 struct generation {
-  int number;
-  int collect_count;
+  int number; /** Номер поколения */
+  int collect_count; /** Кол-во сборок */
 
-  struct space* from;
-  struct space* to;
+  struct space* from; /** Место, где в первую очередь выделяется память */
+  struct space* to; /** Место, куда переносятся в рамках копирующей сборки объекты */
 
-  void* scan;
+  void* scan; /** Техническая переменная копирующей сборки мусора */
 } g0, g1;
 
 int generation_count = 2;
 struct generation* generations[] = { &g0, &g1 };
 
 // common funcs
+
+// Выделяет первоначальные блоки памяти для поколений
 void init_generation();
-void alloc_stat_update(size_t size_in_bytes);
+// Инициирует сборку мусора
 void gc_collect();
-void print_separator();
-void gc_collect_stat_update();
-bool is_in_heap(const void* ptr, const void* heap, size_t heap_size);
-size_t get_stella_object_size(const stella_object *obj);
+// Обновление статистики по выделению памяти
+void alloc_stat_update(size_t size_in_bytes);
+// Выход программы при неспособности выделить память
 void exit_with_out_memory_error();
+// Обновление статистики по сборке мусора
+void gc_collect_stat_update();
+// Техническая функция красивого принта
+void print_separator();
+// Получает вес объекта stella
+size_t get_stella_object_size(const stella_object *obj);
+// Проверяет указывает ли переданный указатель в кучу
+bool is_in_heap(const void* ptr, const void* heap, size_t heap_size);
 
 // gc_object
+
+// Получает вес объекта gc
 size_t get_gc_object_size(const struct gc_object *obj);
+// Получает указатель на объект gc по указателю на объект stella
 struct gc_object* get_gc_object(void* st_ptr);
+// Получает указатель на объект stella по указателю на объект gc
 stella_object* get_stella_object(struct gc_object* gc_ptr);
 
 // space
+
+// Проверяет указывает ли указатель на объект в месте
 bool is_in_place(const struct space* space, const void* ptr);
+// Проверяет достаточно ли места в месте
 bool has_enough_space(const struct space* space, size_t requested_size);
+// Выделяет запрошенное число памяти в месте
 struct gc_object* alloc_in_space(struct space* space, size_t size_in_bytes);
+// Выводит текущее состояние места
 void print_space(const struct space* space);
 
 // generation
+
+// Выводит текущее состояние поколения
 void print_state(const struct generation* g);
+// Пытается выделить память запрошенного размера в поколении
 void* try_alloc(struct generation* g, size_t size_in_bytes);
+// Инициирует сборку в поколении
 void collect(struct generation* g);
+// Функции реализовывающие копирующую сборку мусора
 bool chase(struct generation* g, struct gc_object *p);
 void* forward(struct generation* g, void* p);
 
@@ -97,7 +126,7 @@ void* gc_alloc(const size_t size_in_bytes) {
   }
 
   if (result != NULL) {
-    alloc_stat_update(size_in_bytes); // todo add pointer
+    alloc_stat_update(size_in_bytes);
   } else {
     exit_with_out_memory_error();
   }
@@ -130,8 +159,9 @@ void print_gc_alloc_stats() {
   printf("STATS\n");
   print_separator();
 
+  printf("Total memory requested:   %d bytes (%d objects)\n", total_requested_bytes, total_allocated_objects);
   printf("Total memory allocation:  %d bytes (%d objects)\n", total_allocated_bytes, total_allocated_objects);
-  printf("Total garbage collecting: %d\n", total_gc_collect);
+  printf("Total garbage collecting: %d. G_0: %d. G_1: %d\n", total_gc_collect, g0.collect_count, g1.collect_count);
   printf("Maximum residency:        %d bytes (%d objects)\n", max_allocated_bytes, max_allocated_objects);
   printf("Total memory use:         %d reads and %d writes\n", total_reads, total_writes);
   printf("Max GC roots stack size:  %d roots\n", gc_roots_max_size);
@@ -175,7 +205,7 @@ void init_generation() {
   g0_space_from.heap = malloc(MAX_ALLOC_SIZE);
   g0_space_from.next = g0_space_from.heap;
 
-  const int g1_space_size = MAX_ALLOC_SIZE * 4;
+  const int g1_space_size = MAX_ALLOC_SIZE * GEN_SIZE_MULTIPLIER;
   g1_space_from.gen = 1;
   g1_space_from.size = g1_space_size;
   g1_space_from.heap = malloc(g1_space_size);
@@ -195,7 +225,8 @@ void init_generation() {
 }
 
 void alloc_stat_update(const size_t size_in_bytes) {
-  total_allocated_bytes += size_in_bytes;
+  total_requested_bytes += size_in_bytes;
+  total_allocated_bytes += size_in_bytes + sizeof(void*);
   total_allocated_objects += 1;
   max_allocated_bytes = total_allocated_bytes;
   max_allocated_objects = total_allocated_objects;
@@ -224,7 +255,7 @@ bool is_in_heap(const void* ptr, const void* heap, const size_t heap_size) {
 
 void exit_with_out_memory_error() {
   printf("Out of memory!");
-  exit(137); // выход? как обрабатывать отсутствие памяти
+  exit(137);
 }
 
 // gc_object
