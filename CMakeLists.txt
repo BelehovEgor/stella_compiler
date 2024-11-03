@@ -9,4 +9,6 @@ add_executable(kkuk
         tests/fibbonachi.c
         tests/factorial-pure.c
         stella/runtime.c
+        tests/square.c
+        tests/exp2.c
 )

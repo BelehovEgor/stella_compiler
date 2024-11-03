@@ -21,7 +21,7 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (24 * 40)
+#define MAX_ALLOC_SIZE (24 * 64)
 #define MAX_CHANGED_NODES 1024
 #define DEBUG_LOGS
 
