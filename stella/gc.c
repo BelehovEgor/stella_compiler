@@ -21,7 +21,7 @@ int total_writes = 0;
 int total_gc_collect = 0;
 
 #define MAX_GC_ROOTS 1024
-#define MAX_ALLOC_SIZE (24 * 8)
+#define MAX_ALLOC_SIZE (24 * 40)
 #define MAX_CHANGED_NODES 1024
 #define DEBUG_LOGS
 
@@ -82,7 +82,7 @@ void print_space(const struct space* space);
 void print_state(const struct generation* g);
 void* try_alloc(struct generation* g, size_t size_in_bytes);
 void collect(struct generation* g);
-struct gc_object* chase(struct generation* g, struct gc_object *p);
+bool chase(struct generation* g, struct gc_object *p);
 void* forward(struct generation* g, void* p);
 
 // public
@@ -175,7 +175,7 @@ void init_generation() {
   g0_space_from.heap = malloc(MAX_ALLOC_SIZE);
   g0_space_from.next = g0_space_from.heap;
 
-  const int g1_space_size = MAX_ALLOC_SIZE * 2;
+  const int g1_space_size = MAX_ALLOC_SIZE * 4;
   g1_space_from.gen = 1;
   g1_space_from.size = g1_space_size;
   g1_space_from.heap = malloc(g1_space_size);
@@ -312,12 +312,12 @@ void print_state(const struct generation* g) {
   printf("COLLECT COUNT %d\n", g->collect_count);
   print_space(g->from);
 
-#ifdef DEBUG_LOGS
-  printf("TO SPACE\n");
-  print_space(g->to);
-#endif
+  if (g->to->gen == g->from->gen) {
+    printf("TO SPACE\n");
+    print_space(g->to);
+  }
 
-  printf("SCAN: %-15p | NEXT: %-15p | LIMIT: %-15p\n", g->scan, g->scan, g->to->next + g->to->size);
+  printf("SCAN: %-15p | NEXT: %-15p | LIMIT: %-15p\n", g->scan, g->to->next, g->to->heap + g->to->size);
 
   print_separator();
 }
@@ -331,11 +331,11 @@ void* try_alloc(struct generation* g, const size_t size_in_bytes) {
   return allocated + sizeof(void*);
 }
 
-struct gc_object* chase(struct generation* g, struct gc_object *p) {
+bool chase(struct generation* g, struct gc_object *p) {
   do {
     struct gc_object *q = alloc_in_space(g->to, get_stella_object_size(&p->stella_object));
     if (q == NULL) {
-      return p;
+      return false;
     }
 
     const int field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(p->stella_object.object_header);
@@ -359,7 +359,7 @@ struct gc_object* chase(struct generation* g, struct gc_object *p) {
     p = r;
   } while (p != NULL);
 
-  return NULL;
+  return true;
 }
 
 void* forward(struct generation* g, void* p) {
@@ -373,16 +373,16 @@ void* forward(struct generation* g, void* p) {
     return get_stella_object(gc_object->moved_to);
   }
 
-  struct gc_object* not_chased = chase(g, gc_object);
-  if (not_chased != NULL) {
+  bool chase_result = chase(g, gc_object);
+  if (!chase_result) {
     if (g->to->gen == g->from->gen) {
       exit_with_out_memory_error();
     }
 
     collect(generations[g->to->gen]);
 
-    not_chased = chase(g, not_chased);
-    if (not_chased != NULL) {
+    chase_result = chase(g, gc_object);
+    if (!chase_result) {
       exit_with_out_memory_error();
     }
   }
@@ -396,8 +396,7 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("COLLECTING G_%d - COLLECTING NUMBER %d\n", g->number, g->collect_count);
-  print_state(g);
-  print_gc_roots();
+  print_gc_state();
 #endif
 
   g->scan = g->to->next;
@@ -410,8 +409,7 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("FORWARD ALL ROOTS\n");
-  print_state(g);
-  print_gc_roots();
+  print_gc_state();
 #endif
 
   // run for all objects in prev generations and try find link to collected generation
@@ -430,8 +428,7 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("FORWARD FIELDS OF OBJECT FROM EARLY GEN\n");
-  print_state(g);
-  print_gc_roots();
+  print_gc_state();
 #endif
 
   // changed objects
@@ -448,8 +445,7 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("FORWARD CHANGED OBJECT FIELDS\n");
-  print_state(g);
-  print_gc_roots();
+  print_gc_state();
 #endif
 
   while (g->scan < g->to->next) {
@@ -465,11 +461,10 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("SCAN TO NEXT\n");
-  print_state(g);
-  print_gc_roots();
+  print_gc_state();
 #endif
 
-  if (g->from->gen == g->to->gen) { // copiyng gc
+  if (g->from->gen == g->to->gen) { // copying gc
     void *buff = g->from;
     g->from = g->to;
     g->to = buff;
@@ -478,6 +473,7 @@ void collect(struct generation* g) {
 
     struct generation* past = generations[g->from->gen - 1];
     past->to = g->from;
+    past->scan = g->from->heap; // i hope its will work (run from start because struct of from can change)
   } else { // generations
     struct generation* current = generations[g->from->gen];
     const struct generation* next = generations[g->to->gen];
@@ -488,7 +484,6 @@ void collect(struct generation* g) {
 #ifdef DEBUG_LOGS
   print_separator();
   printf("END OF COLLECTING\n");
-  print_state(g);
-  print_gc_roots();
+  print_gc_state();
 #endif
 }
