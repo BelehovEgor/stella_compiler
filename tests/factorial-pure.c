@@ -1,5 +1,5 @@
-
 /*
+
 #include "../stella/runtime.h"
 #include <locale.h>
 
@@ -319,5 +319,5 @@ int main(int argc, char **argv) {
   print_stella_stats();
   return 0;
 }
-*/
 
+*/

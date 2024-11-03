@@ -28,7 +28,7 @@ stella_object* alloc_stella_object(enum TAG tag, int fields_count) {
     case TAG_TUPLE: if (fields_count == 0) { return &the_EMPTY_TUPLE; }
     // allocate an object with at least one field (or an unknown tag)
     default:
-      obj = gc_alloc((1 + fields_count) * sizeof(void*));
+      obj = gc_alloc(sizeof(stella_object) + fields_count * sizeof(void*));
       STELLA_OBJECT_INIT_TAG(obj, tag);
       STELLA_OBJECT_INIT_FIELDS_COUNT(obj, fields_count);
       return obj;
@@ -66,17 +66,17 @@ stella_object* stella_object_nat_rec(stella_object* n, stella_object* z, stella_
   printf("f = "); print_stella_object(f);
   printf(")\n");
 #endif
-  gc_push_root(&n);
-  gc_push_root(&z);
-  gc_push_root(&f);
+  gc_push_root((void**)&n);
+  gc_push_root((void**)&z);
+  gc_push_root((void**)&f);
   while (STELLA_OBJECT_HEADER_TAG(n->object_header) == TAG_SUCC) {
     n = STELLA_OBJECT_SUCC_ARG(n);
     g = STELLA_OBJECT_CLOSURE_CALL(f, n);
     z = STELLA_OBJECT_CLOSURE_CALL(g, z);
   }
-  gc_pop_root(&f);
-  gc_pop_root(&z);
-  gc_pop_root(&n);
+  gc_pop_root((void**)&f);
+  gc_pop_root((void**)&z);
+  gc_pop_root((void**)&n);
   return z;
 }
 
