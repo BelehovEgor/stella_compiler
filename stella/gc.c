@@ -24,7 +24,7 @@ int total_gc_collect = 0;
 
 #define MAX_ALLOC_SIZE (24 * 64)
 #define GEN_SIZE_MULTIPLIER 4
-#define DEBUG_LOGS
+//#define DEBUG_LOGS
 
 #define MAX_GC_ROOTS 1024
 int gc_roots_max_size = 0;
